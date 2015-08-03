@@ -1,0 +1,111 @@
+// Solarized Light 
+// 
+// For use with Jekyll and Pygments
+// 
+// http://ethanschoonover.com/solarized
+// 
+// SOLARIZED HEX      ROLE
+// --------- -------- ------------------------------------------
+// base01    #586e75  body text / default code / primary content
+// base1     #93a1a1  comments / secondary content
+// base3     #fdf6e3  background
+// orange    #cb4b16  constants
+// red       #dc322f  regex, special keywords
+// blue      #268bd2  reserved keywords
+// cyan      #2aa198  strings, numbers
+// green     #859900  operators, other keywords
+
+$color_solitaire_approx: #fdf6e3;
+$color_shuttle_gray_approx: #586e75;
+$color_pewter_approx: #93a1a1;
+$color_limeade_approx: #859900;
+$color_orange_roughy_approx: #cb4b16;
+$color_jungle_green_approx: #2aa198;
+$color_alizarin_crimson_approx: #dc322f;
+$color_curious_blue_approx: #268bd2;
+$color_hot_toddy_approx: #b58900;
+$color_mountain_mist_approx: #999;
+
+.highlight {
+  background-color: $color_solitaire_approx;
+  color: $color_shuttle_gray_approx;
+  .c { color: $color_pewter_approx; }
+  .err { color: $color_shuttle_gray_approx; }
+  .g { color: $color_shuttle_gray_approx; }
+  .k { color: $color_limeade_approx; }
+  .l { color: $color_shuttle_gray_approx; }
+  .n { color: $color_shuttle_gray_approx; }
+  .o { color: $color_limeade_approx; }
+  .x { color: $color_orange_roughy_approx; }
+  .p { color: $color_shuttle_gray_approx; }
+  .cm { color: $color_pewter_approx; }
+  .cp { color: $color_limeade_approx; }
+  .c1 { color: $color_pewter_approx; }
+  .cs { color: $color_limeade_approx; }
+  .gd { color: $color_jungle_green_approx; }
+  .ge { color: $color_shuttle_gray_approx; font-style: italic; }
+  .gr { color: $color_alizarin_crimson_approx; }
+  .gh { color: $color_orange_roughy_approx; }
+  .gi { color: $color_limeade_approx; }
+  .go { color: $color_shuttle_gray_approx; }
+  .gp { color: $color_shuttle_gray_approx; }
+  .gs { color: $color_shuttle_gray_approx; font-weight: bold; }
+  .gu { color: $color_orange_roughy_approx; }
+  .gt { color: $color_shuttle_gray_approx; }
+  .kc { color: $color_orange_roughy_approx; }
+  .kd { color: $color_curious_blue_approx; }
+  .kn { color: $color_limeade_approx; }
+  .kp { color: $color_limeade_approx; }
+  .kr { color: $color_curious_blue_approx; }
+  .kt { color: $color_alizarin_crimson_approx; }
+  .ld { color: $color_shuttle_gray_approx; }
+  .m { color: $color_jungle_green_approx; }
+  .s { color: $color_jungle_green_approx; }
+  .na { color: $color_shuttle_gray_approx; }
+  .nb { color: $color_hot_toddy_approx; }
+  .nc { color: $color_curious_blue_approx; }
+  .no { color: $color_orange_roughy_approx; }
+  .nd { color: $color_curious_blue_approx; }
+  .ni { color: $color_orange_roughy_approx; }
+  .ne { color: $color_orange_roughy_approx; }
+  .nf { color: $color_curious_blue_approx; }
+  .nl { color: $color_shuttle_gray_approx; }
+  .nn { color: $color_shuttle_gray_approx; }
+  .nx { color: $color_shuttle_gray_approx; }
+  .py { color: $color_shuttle_gray_approx; }
+  .nt { color: $color_curious_blue_approx; }
+  .nv { color: $color_curious_blue_approx; }
+  .ow { color: $color_limeade_approx; }
+  .w { color: $color_shuttle_gray_approx; }
+  .mf { color: $color_jungle_green_approx; }
+  .mh { color: $color_jungle_green_approx; }
+  .mi { color: $color_jungle_green_approx; }
+  .mo { color: $color_jungle_green_approx; }
+  .sb { color: $color_pewter_approx; }
+  .sc { color: $color_jungle_green_approx; }
+  .sd { color: $color_shuttle_gray_approx; }
+  .s2 { color: $color_jungle_green_approx; }
+  .se { color: $color_orange_roughy_approx; }
+  .sh { color: $color_shuttle_gray_approx; }
+  .si { color: $color_jungle_green_approx; }
+  .sx { color: $color_jungle_green_approx; }
+  .sr { color: $color_alizarin_crimson_approx; }
+  .s1 { color: $color_jungle_green_approx; }
+  .ss { color: $color_jungle_green_approx; }
+  .bp { color: $color_curious_blue_approx; }
+  .vc { color: $color_curious_blue_approx; }
+  .vg { color: $color_curious_blue_approx; }
+  .vi { color: $color_curious_blue_approx; }
+  .il { color: $color_jungle_green_approx; }
+}
+.css {
+  .o {
+    color: $color_mountain_mist_approx;
+    + .nt {
+      color: $color_mountain_mist_approx;
+    }
+  }
+  .nt + .nt {
+    color: $color_mountain_mist_approx;
+  }
+}

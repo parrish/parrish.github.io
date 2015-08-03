@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+
+  <head>
+  <meta charset="UTF-8">
+  <link href="http://gmpg.org/xfn/11" rel="profile">
+
+  <!-- Enable responsiveness on mobile devices-->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>
+    
+      Preloading in Rails &middot; 
+    
+  </title>
+
+  <!-- CSS -->
+  <link rel="stylesheet" href="/styles.css">
+
+  <!-- Icons -->
+  <link rel="apple-touch-icon-precomposed" sizes="144x144" href="/public/apple-touch-icon-precomposed.png">
+  <link rel="shortcut icon" href="/public/favicon.ico">
+
+  <!-- RSS -->
+  <link rel="alternate" type="application/atom+xml" title="" href="/atom.xml">
+</head>
+
+
+  <body>
+
+    <div class="container content">
+      <header class="masthead">
+        <h3 class="masthead-title">
+          <a href="/" title="Home"></a>
+          <small></small>
+        </h3>
+      </header>
+
+      <main>
+        <article class="post">
+  <h1 class="post-title">Preloading in Rails</h1>
+  <time datetime="2015-08-03T00:00:00-05:00" class="post-date">03 Aug 2015</time>
+  <h5 id="tldr-you-may-need-to-manually-choose-between-preloadhttpapidockcomrailsactiverecordquerymethodspreload-and-eagerloadhttpapidockcomrailsactiverecordquerymethodseagerload-instead-of-using-includeshttpapidockcomrailsactiverecordquerymethodsincludes-if-activerecord-gets-confused"><strong>TLDR</strong>; You may need to manually choose between <a href="http://apidock.com/rails/ActiveRecord/QueryMethods/preload"><code>preload</code></a> and <a href="http://apidock.com/rails/ActiveRecord/QueryMethods/eager_load"><code>eager_load</code></a> instead of using <a href="http://apidock.com/rails/ActiveRecord/QueryMethods/includes"><code>includes</code></a> if ActiveRecord gets confused.</h5>
+
+<p>Usually when I’m optimizing a long running query I’m looking for things like index misses or opportunities to eager load with <a href="http://apidock.com/rails/ActiveRecord/QueryMethods/includes"><code>includes</code></a>.  Today I decided to finally make peace with the quirky AR preloading system — specifically a case when it creates a broken query.</p>
+
+<p>Here’s a contrived example to illustrate</p>
+
+<div class="highlight"><pre><code class="language-ruby" data-lang="ruby"><span class="c1"># app/blog.rb</span>
+<span class="k">class</span> <span class="nc">Blog</span> <span class="o">&lt;</span> <span class="no">ActiveRecord</span><span class="o">::</span><span class="no">Base</span>
+  <span class="n">has_many</span> <span class="ss">:posts</span>
+  <span class="n">has_many</span> <span class="ss">:authors</span><span class="p">,</span> <span class="ss">through</span><span class="p">:</span> <span class="ss">:posts</span>
+<span class="k">end</span>
+
+<span class="c1"># app/post.rb</span>
+<span class="k">class</span> <span class="nc">Post</span> <span class="o">&lt;</span> <span class="no">ActiveRecord</span><span class="o">::</span><span class="no">Base</span>
+  <span class="n">belongs_to</span> <span class="ss">:blog</span>
+  <span class="n">belongs_to</span> <span class="ss">:author</span>
+<span class="k">end</span>
+
+<span class="c1"># app/author.rb</span>
+<span class="k">class</span> <span class="nc">Author</span> <span class="o">&lt;</span> <span class="no">ActiveRecord</span><span class="o">::</span><span class="no">Base</span>
+  <span class="n">has_many</span> <span class="ss">:posts</span>
+<span class="k">end</span></code></pre></div>
+
+<p>Simple enough.</p>
+
+<p>Let’s say we want to build a view that shows blogs containing posts by a specific author, and the latest post (by any author) for that blog:</p>
+
+<div class="highlight"><pre><code class="language-ruby" data-lang="ruby"><span class="c1"># app/blog.rb</span>
+<span class="k">class</span> <span class="nc">Blog</span> <span class="o">&lt;</span> <span class="no">ActiveRecord</span><span class="o">::</span><span class="no">Base</span>
+  <span class="n">has_many</span> <span class="ss">:posts</span>
+  <span class="n">has_one</span> <span class="ss">:latest_post</span><span class="p">,</span> <span class="o">-&gt;</span><span class="p">{</span> <span class="n">order</span> <span class="ss">created_at</span><span class="p">:</span> <span class="ss">:desc</span> <span class="p">},</span> <span class="ss">class_name</span><span class="p">:</span> <span class="s1">&#39;Post&#39;</span>
+
+  <span class="n">has_many</span> <span class="ss">:authors</span><span class="p">,</span> <span class="ss">through</span><span class="p">:</span> <span class="ss">:posts</span>
+  <span class="n">scope</span> <span class="ss">:with_author</span><span class="p">,</span> <span class="o">-&gt;</span><span class="p">(</span><span class="n">author</span><span class="p">){</span> <span class="n">joins</span><span class="p">(</span><span class="ss">:authors</span><span class="p">)</span><span class="o">.</span><span class="n">where</span> <span class="s2">&quot;authors.id = ?&quot;</span><span class="p">,</span> <span class="n">author</span><span class="o">.</span><span class="n">id</span> <span class="p">}</span>
+<span class="k">end</span></code></pre></div>
+
+<p>So now we’re producing SQL like</p>
+
+<div class="highlight"><pre><code class="language-ruby" data-lang="ruby"><span class="n">blog</span><span class="o">.</span><span class="n">latest_post</span></code></pre></div>
+
+<div class="highlight"><pre><code class="language-sql" data-lang="sql"><span class="k">SELECT</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="o">*</span>
+<span class="k">FROM</span> <span class="ss">&quot;posts&quot;</span>
+<span class="k">WHERE</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;blog_id&quot;</span> <span class="o">=</span> <span class="mi">1</span>
+<span class="k">ORDER</span> <span class="k">BY</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;created_at&quot;</span> <span class="k">DESC</span>
+<span class="k">LIMIT</span> <span class="mi">1</span></code></pre></div>
+
+<p>and</p>
+
+<div class="highlight"><pre><code class="language-ruby" data-lang="ruby"><span class="no">Blog</span><span class="o">.</span><span class="n">with_author</span> <span class="n">author</span></code></pre></div>
+
+<div class="highlight"><pre><code class="language-sql" data-lang="sql"><span class="k">SELECT</span> <span class="ss">&quot;blogs&quot;</span><span class="p">.</span><span class="o">*</span>
+<span class="k">FROM</span> <span class="ss">&quot;blogs&quot;</span>
+
+<span class="k">INNER</span> <span class="k">JOIN</span> <span class="ss">&quot;posts&quot;</span>
+  <span class="k">ON</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;blog_id&quot;</span> <span class="o">=</span> <span class="ss">&quot;blogs&quot;</span><span class="p">.</span><span class="ss">&quot;id&quot;</span>
+
+<span class="k">INNER</span> <span class="k">JOIN</span> <span class="ss">&quot;authors&quot;</span>
+  <span class="k">ON</span> <span class="ss">&quot;authors&quot;</span><span class="p">.</span><span class="ss">&quot;id&quot;</span> <span class="o">=</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;author_id&quot;</span>
+
+<span class="k">WHERE</span> <span class="p">(</span><span class="n">authors</span><span class="p">.</span><span class="n">id</span> <span class="o">=</span> <span class="mi">1</span><span class="p">)</span></code></pre></div>
+
+<p>Looks good, but there is an N<sup>2</sup> query here when you combine them</p>
+
+<div class="highlight"><pre><code class="language-ruby" data-lang="ruby"><span class="no">Blog</span><span class="o">.</span><span class="n">with_author</span><span class="p">(</span><span class="n">author</span><span class="p">)</span><span class="o">.</span><span class="n">collect</span> <span class="o">&amp;</span><span class="ss">:latest_post</span></code></pre></div>
+
+<div class="highlight"><pre><code class="language-sql" data-lang="sql"><span class="k">SELECT</span> <span class="ss">&quot;blogs&quot;</span><span class="p">.</span><span class="o">*</span> <span class="k">FROM</span> <span class="ss">&quot;blogs&quot;</span> <span class="k">INNER</span> <span class="k">JOIN</span> <span class="ss">&quot;posts&quot;</span> <span class="k">ON</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;blog_id&quot;</span> <span class="o">=</span> <span class="ss">&quot;blogs&quot;</span><span class="p">.</span><span class="ss">&quot;id&quot;</span> <span class="k">INNER</span> <span class="k">JOIN</span> <span class="ss">&quot;authors&quot;</span> <span class="k">ON</span> <span class="ss">&quot;authors&quot;</span><span class="p">.</span><span class="ss">&quot;id&quot;</span> <span class="o">=</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;author_id&quot;</span> <span class="k">WHERE</span> <span class="p">(</span><span class="n">authors</span><span class="p">.</span><span class="n">id</span> <span class="o">=</span> <span class="mi">1</span><span class="p">)</span>
+<span class="k">SELECT</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="o">*</span> <span class="k">FROM</span> <span class="ss">&quot;posts&quot;</span> <span class="k">WHERE</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;blog_id&quot;</span> <span class="o">=</span> <span class="mi">1</span> <span class="k">ORDER</span> <span class="k">BY</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;created_at&quot;</span> <span class="k">DESC</span> <span class="k">LIMIT</span> <span class="mi">1</span>
+<span class="k">SELECT</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="o">*</span> <span class="k">FROM</span> <span class="ss">&quot;posts&quot;</span> <span class="k">WHERE</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;blog_id&quot;</span> <span class="o">=</span> <span class="mi">1</span> <span class="k">ORDER</span> <span class="k">BY</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;created_at&quot;</span> <span class="k">DESC</span> <span class="k">LIMIT</span> <span class="mi">1</span>
+<span class="k">SELECT</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="o">*</span> <span class="k">FROM</span> <span class="ss">&quot;posts&quot;</span> <span class="k">WHERE</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;blog_id&quot;</span> <span class="o">=</span> <span class="mi">1</span> <span class="k">ORDER</span> <span class="k">BY</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;created_at&quot;</span> <span class="k">DESC</span> <span class="k">LIMIT</span> <span class="mi">1</span>
+<span class="k">SELECT</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="o">*</span> <span class="k">FROM</span> <span class="ss">&quot;posts&quot;</span> <span class="k">WHERE</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;blog_id&quot;</span> <span class="o">=</span> <span class="mi">2</span> <span class="k">ORDER</span> <span class="k">BY</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;created_at&quot;</span> <span class="k">DESC</span> <span class="k">LIMIT</span> <span class="mi">1</span>
+<span class="k">SELECT</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="o">*</span> <span class="k">FROM</span> <span class="ss">&quot;posts&quot;</span> <span class="k">WHERE</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;blog_id&quot;</span> <span class="o">=</span> <span class="mi">2</span> <span class="k">ORDER</span> <span class="k">BY</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;created_at&quot;</span> <span class="k">DESC</span> <span class="k">LIMIT</span> <span class="mi">1</span>
+<span class="k">SELECT</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="o">*</span> <span class="k">FROM</span> <span class="ss">&quot;posts&quot;</span> <span class="k">WHERE</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;blog_id&quot;</span> <span class="o">=</span> <span class="mi">2</span> <span class="k">ORDER</span> <span class="k">BY</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;created_at&quot;</span> <span class="k">DESC</span> <span class="k">LIMIT</span> <span class="mi">1</span>
+<span class="c1">-- ...</span></code></pre></div>
+
+<p>So we’ll just eager load our associations with</p>
+
+<div class="highlight"><pre><code class="language-ruby" data-lang="ruby"><span class="no">Blog</span><span class="o">.</span><span class="n">includes</span><span class="p">(</span><span class="ss">:latest_post</span><span class="p">,</span> <span class="ss">:authors</span><span class="p">)</span><span class="o">.</span><span class="n">with_author</span><span class="p">(</span><span class="n">author</span><span class="p">)</span><span class="o">.</span><span class="n">collect</span> <span class="o">&amp;</span><span class="ss">:latest_post</span></code></pre></div>
+
+<p>AR makes the query look insane, but here’s the less ugly version</p>
+
+<div class="highlight"><pre><code class="language-sql" data-lang="sql"><span class="k">SELECT</span>
+  <span class="c1">-- Blog attributes</span>
+  <span class="ss">&quot;blogs&quot;</span><span class="p">.</span><span class="ss">&quot;id&quot;</span> <span class="k">AS</span> <span class="n">t0_r0</span><span class="p">,</span>
+  <span class="ss">&quot;blogs&quot;</span><span class="p">.</span><span class="ss">&quot;title&quot;</span> <span class="k">AS</span> <span class="n">t0_r1</span><span class="p">,</span>
+  <span class="ss">&quot;blogs&quot;</span><span class="p">.</span><span class="ss">&quot;created_at&quot;</span> <span class="k">AS</span> <span class="n">t0_r2</span><span class="p">,</span>
+  <span class="ss">&quot;blogs&quot;</span><span class="p">.</span><span class="ss">&quot;updated_at&quot;</span> <span class="k">AS</span> <span class="n">t0_r3</span><span class="p">,</span>
+
+  <span class="c1">-- Post attributes</span>
+  <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;id&quot;</span> <span class="k">AS</span> <span class="n">t1_r0</span><span class="p">,</span>
+  <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;title&quot;</span> <span class="k">AS</span> <span class="n">t1_r1</span><span class="p">,</span>
+  <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;blog_id&quot;</span> <span class="k">AS</span> <span class="n">t1_r2</span><span class="p">,</span>
+  <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;author_id&quot;</span> <span class="k">AS</span> <span class="n">t1_r3</span><span class="p">,</span>
+  <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;created_at&quot;</span> <span class="k">AS</span> <span class="n">t1_r4</span><span class="p">,</span>
+  <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;updated_at&quot;</span> <span class="k">AS</span> <span class="n">t1_r5</span><span class="p">,</span>
+
+  <span class="c1">-- Author attributes</span>
+  <span class="ss">&quot;authors&quot;</span><span class="p">.</span><span class="ss">&quot;id&quot;</span> <span class="k">AS</span> <span class="n">t2_r0</span><span class="p">,</span>
+  <span class="ss">&quot;authors&quot;</span><span class="p">.</span><span class="ss">&quot;name&quot;</span> <span class="k">AS</span> <span class="n">t2_r1</span><span class="p">,</span>
+  <span class="ss">&quot;authors&quot;</span><span class="p">.</span><span class="ss">&quot;created_at&quot;</span> <span class="k">AS</span> <span class="n">t2_r2</span><span class="p">,</span>
+  <span class="ss">&quot;authors&quot;</span><span class="p">.</span><span class="ss">&quot;updated_at&quot;</span> <span class="k">AS</span> <span class="n">t2_r3</span>
+
+<span class="k">FROM</span> <span class="ss">&quot;blogs&quot;</span>
+
+<span class="c1">-- Get the posts for the blog</span>
+<span class="k">INNER</span> <span class="k">JOIN</span> <span class="ss">&quot;posts&quot;</span>
+  <span class="k">ON</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;blog_id&quot;</span> <span class="o">=</span> <span class="ss">&quot;blogs&quot;</span><span class="p">.</span><span class="ss">&quot;id&quot;</span>
+
+<span class="c1">-- Get the authors for those posts</span>
+<span class="k">INNER</span> <span class="k">JOIN</span> <span class="ss">&quot;authors&quot;</span>
+  <span class="k">ON</span> <span class="ss">&quot;authors&quot;</span><span class="p">.</span><span class="ss">&quot;id&quot;</span> <span class="o">=</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;author_id&quot;</span>
+
+<span class="c1">-- ?????</span>
+<span class="c1">-- umm.... latest posts I guess?</span>
+<span class="c1">-- ?????</span>
+<span class="k">LEFT</span> <span class="k">OUTER</span> <span class="k">JOIN</span> <span class="ss">&quot;posts&quot;</span> <span class="ss">&quot;latest_posts_blogs&quot;</span>
+  <span class="k">ON</span> <span class="ss">&quot;latest_posts_blogs&quot;</span><span class="p">.</span><span class="ss">&quot;blog_id&quot;</span> <span class="o">=</span> <span class="ss">&quot;blogs&quot;</span><span class="p">.</span><span class="ss">&quot;id&quot;</span>
+
+<span class="k">WHERE</span> <span class="p">(</span><span class="n">authors</span><span class="p">.</span><span class="n">id</span> <span class="o">=</span> <span class="mi">1</span><span class="p">)</span></code></pre></div>
+
+<p>Okay, so that doesn’t look right at all, but let’s test it to be sure</p>
+
+<div class="highlight"><pre><code class="language-ruby" data-lang="ruby"><span class="n">blog</span> <span class="o">=</span> <span class="no">Blog</span><span class="o">.</span><span class="n">create</span> <span class="ss">title</span><span class="p">:</span> <span class="s1">&#39;blurg&#39;</span>
+<span class="n">author</span> <span class="o">=</span> <span class="no">Author</span><span class="o">.</span><span class="n">create</span> <span class="nb">name</span><span class="p">:</span> <span class="s1">&#39;somebody&#39;</span>
+<span class="n">old_post</span> <span class="o">=</span> <span class="no">Post</span><span class="o">.</span><span class="n">create</span> <span class="ss">blog</span><span class="p">:</span> <span class="n">blog</span><span class="p">,</span> <span class="ss">author</span><span class="p">:</span> <span class="n">author</span><span class="p">,</span> <span class="ss">title</span><span class="p">:</span> <span class="s1">&#39;old post&#39;</span>
+<span class="n">new_post</span> <span class="o">=</span> <span class="no">Post</span><span class="o">.</span><span class="n">create</span> <span class="ss">blog</span><span class="p">:</span> <span class="n">blog</span><span class="p">,</span> <span class="ss">author</span><span class="p">:</span> <span class="n">author</span><span class="p">,</span> <span class="ss">title</span><span class="p">:</span> <span class="s1">&#39;new post&#39;</span>
+
+<span class="n">blog</span><span class="o">.</span><span class="n">latest_post</span><span class="o">.</span><span class="n">title</span>
+<span class="c1"># =&gt; &quot;new post&quot;</span>
+
+<span class="c1"># preloading the post without filtering</span>
+<span class="no">Blog</span><span class="o">.</span><span class="n">includes</span><span class="p">(</span><span class="ss">:latest_post</span><span class="p">)</span>
+    <span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="nb">id</span><span class="p">:</span> <span class="n">blog</span><span class="o">.</span><span class="n">id</span><span class="p">)</span><span class="o">.</span><span class="n">first</span><span class="o">.</span><span class="n">latest_post</span><span class="o">.</span><span class="n">title</span>
+<span class="c1"># =&gt; &quot;new post&quot;</span>
+
+<span class="c1">#  filtering and preloading only the latest post</span>
+<span class="no">Blog</span><span class="o">.</span><span class="n">includes</span><span class="p">(</span><span class="ss">:latest_post</span><span class="p">)</span><span class="o">.</span><span class="n">with_author</span><span class="p">(</span><span class="n">author</span><span class="p">)</span>
+    <span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="nb">id</span><span class="p">:</span> <span class="n">blog</span><span class="o">.</span><span class="n">id</span><span class="p">)</span><span class="o">.</span><span class="n">first</span><span class="o">.</span><span class="n">latest_post</span><span class="o">.</span><span class="n">title</span>
+<span class="c1"># =&gt; &quot;new post&quot;</span>
+
+<span class="c1"># filtering and preloading latest post and authors</span>
+<span class="no">Blog</span><span class="o">.</span><span class="n">includes</span><span class="p">(</span><span class="ss">:latest_post</span><span class="p">,</span> <span class="ss">:authors</span><span class="p">)</span><span class="o">.</span><span class="n">with_author</span><span class="p">(</span><span class="n">author</span><span class="p">)</span>
+    <span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="nb">id</span><span class="p">:</span> <span class="n">blog</span><span class="o">.</span><span class="n">id</span><span class="p">)</span><span class="o">.</span><span class="n">first</span><span class="o">.</span><span class="n">latest_post</span><span class="o">.</span><span class="n">title</span>
+<span class="c1"># =&gt; &quot;old post&quot;</span></code></pre></div>
+
+<p>Right, so it’s specifically when we’re trying to eager load an association that’s joined that’s screwing things up.</p>
+
+<p>Let’s look at the documentation here:</p>
+
+<blockquote>
+  <p><a href="http://apidock.com/rails/ActiveRecord/QueryMethods/includes"><code>includes(*args)</code></a>: “Specify relationships to be included in the result set”</p>
+</blockquote>
+
+<blockquote>
+  <p><a href="http://apidock.com/rails/ActiveRecord/QueryMethods/preload"><code>preload(*args)</code></a>: “Allows preloading of args, in the same way that includes does”</p>
+</blockquote>
+
+<blockquote>
+  <p><a href="http://apidock.com/rails/ActiveRecord/QueryMethods/eager_load"><code>eager_load(*args)</code></a>: “Forces eager loading by performing a LEFT OUTER JOIN on args”</p>
+</blockquote>
+
+<p>That’s not terribly useful to disambiguate the differences between these methods.</p>
+
+<p>This article (<a href="http://blog.arkency.com/2013/12/rails4-preloading/">3 ways to do eager loading (preloading) in Rails 3 &amp; 4</a>) has some useful information, but specifically it clues us into a few things</p>
+
+<ul>
+  <li><a href="http://apidock.com/rails/ActiveRecord/QueryMethods/includes"><code>includes</code></a> can dynamically choose between <a href="http://apidock.com/rails/ActiveRecord/QueryMethods/preload"><code>preload</code></a> and <a href="http://apidock.com/rails/ActiveRecord/QueryMethods/eager_load"><code>eager_load</code></a></li>
+  <li><a href="http://apidock.com/rails/ActiveRecord/QueryMethods/preload"><code>preload</code></a> eager loads with separate queries</li>
+  <li><a href="http://apidock.com/rails/ActiveRecord/QueryMethods/eager_load"><code>eager_load</code></a> joins it to the current query</li>
+</ul>
+
+<h4 id="contrary-to-the-documentation-of-preloadhttpapidockcomrailsactiverecordquerymethodspreload-it-will-actually-generate-a-separate-query">Contrary to the documentation of <a href="http://apidock.com/rails/ActiveRecord/QueryMethods/preload"><code>preload</code></a>: it will actually <strong>generate a separate query</strong>.</h4>
+
+<p>So let’s try it</p>
+
+<div class="highlight"><pre><code class="language-ruby" data-lang="ruby"><span class="no">Blog</span><span class="o">.</span><span class="n">preload</span><span class="p">(</span><span class="ss">:latest_post</span><span class="p">)</span><span class="o">.</span><span class="n">includes</span><span class="p">(</span><span class="ss">:authors</span><span class="p">)</span><span class="o">.</span><span class="n">with_author</span><span class="p">(</span><span class="n">author</span><span class="p">)</span>
+    <span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="nb">id</span><span class="p">:</span> <span class="n">blog</span><span class="o">.</span><span class="n">id</span><span class="p">)</span><span class="o">.</span><span class="n">first</span><span class="o">.</span><span class="n">latest_post</span><span class="o">.</span><span class="n">title</span>
+<span class="c1"># =&gt; &quot;new post&quot;</span></code></pre></div>
+
+<p>Cool, let’s check the SQL it’s generating with that query from before</p>
+
+<div class="highlight"><pre><code class="language-ruby" data-lang="ruby"><span class="no">Blog</span><span class="o">.</span><span class="n">preload</span><span class="p">(</span><span class="ss">:latest_post</span><span class="p">)</span><span class="o">.</span><span class="n">includes</span><span class="p">(</span><span class="ss">:authors</span><span class="p">)</span><span class="o">.</span><span class="n">with_author</span><span class="p">(</span><span class="n">author</span><span class="p">)</span>
+    <span class="o">.</span><span class="n">collect</span> <span class="o">&amp;</span><span class="ss">:latest_post</span></code></pre></div>
+
+<div class="highlight"><pre><code class="language-sql" data-lang="sql"><span class="k">SELECT</span>
+  <span class="c1">-- Blog attributes</span>
+  <span class="ss">&quot;blogs&quot;</span><span class="p">.</span><span class="ss">&quot;id&quot;</span> <span class="k">AS</span> <span class="n">t0_r0</span><span class="p">,</span>
+  <span class="ss">&quot;blogs&quot;</span><span class="p">.</span><span class="ss">&quot;title&quot;</span> <span class="k">AS</span> <span class="n">t0_r1</span><span class="p">,</span>
+  <span class="ss">&quot;blogs&quot;</span><span class="p">.</span><span class="ss">&quot;created_at&quot;</span> <span class="k">AS</span> <span class="n">t0_r2</span><span class="p">,</span>
+  <span class="ss">&quot;blogs&quot;</span><span class="p">.</span><span class="ss">&quot;updated_at&quot;</span> <span class="k">AS</span> <span class="n">t0_r3</span><span class="p">,</span>
+
+  <span class="c1">-- No post attributes this time</span>
+
+  <span class="c1">-- Author attributes</span>
+  <span class="ss">&quot;authors&quot;</span><span class="p">.</span><span class="ss">&quot;id&quot;</span> <span class="k">AS</span> <span class="n">t1_r0</span><span class="p">,</span>
+  <span class="ss">&quot;authors&quot;</span><span class="p">.</span><span class="ss">&quot;name&quot;</span> <span class="k">AS</span> <span class="n">t1_r1</span><span class="p">,</span>
+  <span class="ss">&quot;authors&quot;</span><span class="p">.</span><span class="ss">&quot;created_at&quot;</span> <span class="k">AS</span> <span class="n">t1_r2</span><span class="p">,</span>
+  <span class="ss">&quot;authors&quot;</span><span class="p">.</span><span class="ss">&quot;updated_at&quot;</span> <span class="k">AS</span> <span class="n">t1_r3</span>
+
+<span class="k">FROM</span> <span class="ss">&quot;blogs&quot;</span>
+
+<span class="c1">-- Get the posts for the blog</span>
+<span class="k">INNER</span> <span class="k">JOIN</span> <span class="ss">&quot;posts&quot;</span>
+  <span class="k">ON</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;blog_id&quot;</span> <span class="o">=</span> <span class="ss">&quot;blogs&quot;</span><span class="p">.</span><span class="ss">&quot;id&quot;</span>
+
+<span class="c1">-- Get the authors for those posts</span>
+<span class="k">INNER</span> <span class="k">JOIN</span> <span class="ss">&quot;authors&quot;</span>
+  <span class="k">ON</span> <span class="ss">&quot;authors&quot;</span><span class="p">.</span><span class="ss">&quot;id&quot;</span> <span class="o">=</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;author_id&quot;</span>
+
+<span class="c1">-- No wacky aliased latest_posts_blogs join this time either</span>
+
+<span class="k">WHERE</span> <span class="p">(</span><span class="n">authors</span><span class="p">.</span><span class="n">id</span> <span class="o">=</span> <span class="mi">1</span><span class="p">)</span>
+
+
+<span class="c1">-- A separate eager-load query for the latest posts</span>
+<span class="k">SELECT</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="o">*</span>
+<span class="k">FROM</span> <span class="ss">&quot;posts&quot;</span>
+<span class="k">WHERE</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;blog_id&quot;</span> <span class="k">IN</span> <span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">6</span><span class="p">,</span> <span class="mi">7</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">9</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+<span class="k">ORDER</span> <span class="k">BY</span> <span class="ss">&quot;posts&quot;</span><span class="p">.</span><span class="ss">&quot;created_at&quot;</span> <span class="k">DESC</span></code></pre></div>
+
+<p>Hey, it works!</p>
+
+<p>So the moral of the story is</p>
+
+<h5 id="you-may-need-to-manually-choose-between-preloadhttpapidockcomrailsactiverecordquerymethodspreload-and-eagerloadhttpapidockcomrailsactiverecordquerymethodseagerload-instead-of-using-includeshttpapidockcomrailsactiverecordquerymethodsincludes-if-ar-doesnt-generate-queries-that-make-sense">You may need to manually choose between <a href="http://apidock.com/rails/ActiveRecord/QueryMethods/preload"><code>preload</code></a> and <a href="http://apidock.com/rails/ActiveRecord/QueryMethods/eager_load"><code>eager_load</code></a> instead of using <a href="http://apidock.com/rails/ActiveRecord/QueryMethods/includes"><code>includes</code></a> if AR doesn’t generate queries that make sense.</h5>
+
+</article>
+
+
+
+      </main>
+
+      <footer class="footer">
+        <small>
+          &copy; <time datetime="2015-08-03T15:15:15-05:00">2015</time>. All rights reserved.
+        </small>
+      </footer>
+    </div>
+
+  </body>
+</html>
